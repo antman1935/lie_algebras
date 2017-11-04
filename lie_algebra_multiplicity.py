@@ -6,6 +6,19 @@ from sage.all import *
 def Eval(string):
     return eval(compile(str(string), '<string>', 'eval', __future__.division.compiler_flag))
 
+def getFundamentalToSimple(name):
+    simples = RootSystem(name).ambient_space().simple_roots()
+    simpleM = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in simples])
+    for i in range(len(simpleM), len(simpleM[0])):
+        simpleM.append([1 if j==i else 0 for j in range(0, len(simpleM[0]))])
+
+    fundamentals = RootSystem(name).ambient_space().fundamental_weights()
+    fundM = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in fundamentals])
+    for i in range(len(fundM), len(fundM[0])):
+        fundM.append([1 if j==i else 0 for j in range(0, len(fundM[0]))])
+
+    return matrix(simpleM).transpose().inverse() * matrix(fundM).transpose()
+
 def getBasisChange(name):
     simples = RootSystem(name).ambient_space().simple_roots()
     bChange = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in simples])
@@ -18,7 +31,7 @@ def geometricSumForPartition(positive_root, translations, q_analog):
     for i in range(0, len(positive_root)):
         for j in range(0, positive_root[i]):
             x = x * translations["A" + str(i+1)]
-    return 1/(1 - x) if not q_analog else 1/(1 -q*x)
+    return 1/(1 - x) if not q_analog else 1/(1 -translations['q']*x)
 
 def calculatePartition(name, weight, positive_roots = [], translations = {}, q_analog = False):
     if positive_roots == []:
@@ -36,6 +49,9 @@ def calculatePartition(name, weight, positive_roots = [], translations = {}, q_a
         variables = var(s)
         for i in range(0, len(weight)):
             translations["A" + str(i+1)] = eval("A" + str(i+1))
+
+        if q_analog:
+            translations['q'] = q
 
     termsForSum = [geometricSumForPartition(list(x), translations, q_analog) for x in positive_roots]
     answer = 1
@@ -69,7 +85,7 @@ def findAltSet(name, lamb = None, mu = None):
         mu = weyl_group.domain()([0 for i in range(0, len(lie_algebra.simple_roots()))])
 
     # check to see if the alt set is the empty set
-    init = (lamb + rho) - (rho + mu)
+    init = (lamb + mu)
     init = changeBasis * vector(list(Eval(init)))
     init = Weight(init)
 
@@ -96,47 +112,55 @@ def findAltSet(name, lamb = None, mu = None):
     return altset
 
 
-def calculateMultiplicity(name, lamb = None, mu = None, q_analog = False):
+def calculateMultiplicity(name, lamb = None, mu = None, q_analog = False, simple=True):
     mult = 0
     lie_algebra = RootSystem(name).ambient_space()
     weyl_group = WeylGroup(name, prefix = "s")
 
     # used to change the basis from the standard basis of R^n to simple roots
-    changeBasis = getBasisChange(name)
+    standard_to_simple = getBasisChange(name)
+    fund_to_simple = getFundamentalToSimple(name)
 
     positive_roots = [vector(list(Eval(x))) for x in RootSystem(name).ambient_space().positive_roots()]
-    positive_roots = [getBasisChange(name) * x for x in positive_roots]
+    positive_roots = [standard_to_simple * x for x in positive_roots]
 
     # if lambda is not specified, the highest root is used
     if lamb == None:
         lamb = lie_algebra.highest_root()
     else:
-        while not len(lamb) == changeBasis.ncols():
+        while not len(lamb) == standard_to_simple.ncols():
             lamb.append(0)
-        lamb = changeBasis.inverse() * vector(lamb)
+        if not simple:
+            lamb = standard_to_simple.inverse() * (fund_to_simple * vector(lamb))
+        else:
+            lamb = standard_to_simple.inverse() * vector(lamb)
         lamb = weyl_group.domain()(list(eval(str(lamb))))
 
     # if mu is not specified, 0 vector is used
     if mu == None:
         mu = weyl_group.domain()([0 for i in range(0, len(lie_algebra.simple_roots()))])
     else:
-        while not len(mu) == changeBasis.ncols():
+        while not len(mu) == standard_to_simple.ncols():
             mu.append(0)
-        mu = changeBasis.inverse() * vector(mu)
+        if not simple:
+            mu = standard_to_simple.inverse() * (fund_to_simple * vector(mu))
+        else:
+            mu = standard_to_simple.inverse() * vector(mu)
         mu = weyl_group.domain()(list(eval(str(mu))))
 
     rho = lie_algebra.rho()
     altset = findAltSet(name, lamb, mu)
     #print(changeBasis * vector(list(Eval(lamb))))
+    translations = {}
     for elm in altset:
         # expression in partition function
         res = elm.action(lamb + rho) - (mu + rho)
 
         #change basis from standard basis to simple roots
         res = vector(list(Eval(res)))
-        res = changeBasis * res
+        res = standard_to_simple * res
 
-        term = calculatePartition(name, list(res), positive_roots, q_analog=q_analog)
+        term = calculatePartition(name, list(res), positive_roots, translations = translations, q_analog=q_analog)
 
         term *= (-1)**elm.length()
         mult += term
@@ -177,17 +201,6 @@ def printPartitions(name, weight, tex):
     output.close()
     print "Done"
 
-#first argument is the name of the lie algebra
-#second argument is lambda, an array that has the coefficients of the simple roots in order of subscript
-#third argument is mu, given in the same way as lambda
-#fourth argument is a boolean flag, so True/False, that determines whether to do the q-analog or not
-#you can ommit any of the last three arguments and a default will be used
-#default for lambda is the highest positive root
-#default for mu is the 0 weight
-#default for the q analog is false
-#if you want to use a subset of the last three, you can set them by name.
-#set lambda with lamb = ..., mu with mu = ..., and q-analog with q_analog = True/False
-#Below are examples
 if __name__ == "__main__":
     #calculateMultiplicity("A3", [3,3,3], [2,2,2], True)
     #calculateMultiplicity("A3", [3,3,3], q_analog=True)
