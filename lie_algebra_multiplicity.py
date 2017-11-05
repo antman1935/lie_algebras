@@ -6,25 +6,46 @@ from sage.all import *
 def Eval(string):
     return eval(compile(str(string), '<string>', 'eval', __future__.division.compiler_flag))
 
+def convertWeightParameters(name, weight, simple):
+    weyl_group = WeylGroup(name, prefix = "s")
+    standard_to_simple = getBasisChange(name)
+    fund_to_simple = getFundamentalToSimple(name)
+
+    while not len(weight) == standard_to_simple.ncols():
+        weight.append(0)
+    if not simple:
+        weight = standard_to_simple.inverse() * (fund_to_simple * vector(weight))
+    else:
+        weight = standard_to_simple.inverse() * vector(weight)
+
+    return weyl_group.domain()(list(eval(str(weight))))
+
+def changeFundToSimple(name, weight):
+    basis_change = getFundamentalToSimple(name)
+    weight = list(weight)
+    while not len(weight) == basis_change.ncols():
+            weight.append(0)
+    return basis_change * vector(weight)
+
 def getFundamentalToSimple(name):
     simples = RootSystem(name).ambient_space().simple_roots()
-    simpleM = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in simples])
-    for i in range(len(simpleM), len(simpleM[0])):
-        simpleM.append([1 if j==i else 0 for j in range(0, len(simpleM[0]))])
+    simple_basis = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in simples])
+    for i in range(len(simple_basis), len(simple_basis[0])):
+        simple_basis.append([1 if j==i else 0 for j in range(0, len(simple_basis[0]))])
 
     fundamentals = RootSystem(name).ambient_space().fundamental_weights()
-    fundM = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in fundamentals])
-    for i in range(len(fundM), len(fundM[0])):
-        fundM.append([1 if j==i else 0 for j in range(0, len(fundM[0]))])
+    fund_basis = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in fundamentals])
+    for i in range(len(fund_basis), len(fund_basis[0])):
+        fund_basis.append([1 if j==i else 0 for j in range(0, len(fund_basis[0]))])
 
-    return matrix(simpleM).transpose().inverse() * matrix(fundM).transpose()
+    return matrix(simple_basis).transpose().inverse() * matrix(fund_basis).transpose()
 
 def getBasisChange(name):
     simples = RootSystem(name).ambient_space().simple_roots()
-    bChange = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in simples])
-    for i in range(len(bChange), len(bChange[0])):
-        bChange.append([1 if j==i else 0 for j in range(0, len(bChange[0]))])
-    return matrix(bChange).transpose().inverse()
+    basis_change = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in simples])
+    for i in range(len(basis_change), len(basis_change[0])):
+        basis_change.append([1 if j==i else 0 for j in range(0, len(basis_change[0]))])
+    return matrix(basis_change).transpose().inverse()
 
 def geometricSumForPartition(positive_root, translations, q_analog):
     x = 1
@@ -33,11 +54,15 @@ def geometricSumForPartition(positive_root, translations, q_analog):
             x = x * translations["A" + str(i+1)]
     return 1/(1 - x) if not q_analog else 1/(1 -translations['q']*x)
 
-def calculatePartition(name, weight, positive_roots = [], translations = {}, q_analog = False):
+def calculatePartition(name, weight, positive_roots = [], translations = {}, q_analog = False, simple = True):
+    root_system = RootSystem(name).ambient_space()
     if positive_roots == []:
-        bChange = getBasisChange(name)
-        positive_roots = [vector(list(Eval(x))) for x in RootSystem(name).ambient_space().positive_roots()]
-        positive_roots = [bChange * x for x in positive_roots]
+        basis_change = getBasisChange(name)
+        positive_roots = [vector(list(Eval(x))) for x in root_system.positive_roots()]
+        positive_roots = [basis_change * x for x in positive_roots]
+
+    if not simple:
+        weight = list(changeFundToSimple(name, weight))[0:len(root_system.simple_roots())]
 
     if translations == {}:
         s = ''
@@ -65,7 +90,7 @@ def calculatePartition(name, weight, positive_roots = [], translations = {}, q_a
     answer = answer.expand()
     return answer
 
-def findAltSet(name, lamb = None, mu = None):
+def findAltSet(name, lamb = None, mu = None, simple = True):
     # initialize constants and vector space for the lie algebra
     lie_algebra = RootSystem(name).ambient_space()
     weyl_group = WeylGroup(name, prefix = "s")
@@ -74,19 +99,23 @@ def findAltSet(name, lamb = None, mu = None):
     altset = [weyl_group.one()]
 
     # used to change the basis from the standard basis of R^n to simple roots
-    changeBasis = getBasisChange(name)
+    basis_change = getBasisChange(name)
 
     # if lambda is not specified, the highest root is used
     if lamb == None:
         lamb = lie_algebra.highest_root()
+    elif type(lamb) is list:
+        lamb = convertWeightParameters(name, lamb, simple)
 
     # if mu is not specified, 0 vector is used
     if mu == None:
         mu = weyl_group.domain()([0 for i in range(0, len(lie_algebra.simple_roots()))])
+    elif type(mu) is list:
+        mu  = convertWeightParameters(name, mu, simple)
 
     # check to see if the alt set is the empty set
     init = (lamb + mu)
-    init = changeBasis * vector(list(Eval(init)))
+    init = basis_change * vector(list(Eval(init)))
     init = Weight(init)
 
     if init.isNegative():
@@ -100,7 +129,7 @@ def findAltSet(name, lamb = None, mu = None):
             if ((altset[i] == simple)or (altset[i] == altset[i] * simple)):
                 continue
             res = (altset[i]*simple).action(lamb + rho) - (rho + mu)
-            res = changeBasis * vector(list(Eval(res)))
+            res = basis_change * vector(list(Eval(res)))
             res = Weight(res)
 
             if not (res.isNegative() or res.hasFraction()):
@@ -128,29 +157,17 @@ def calculateMultiplicity(name, lamb = None, mu = None, q_analog = False, simple
     if lamb == None:
         lamb = lie_algebra.highest_root()
     else:
-        while not len(lamb) == standard_to_simple.ncols():
-            lamb.append(0)
-        if not simple:
-            lamb = standard_to_simple.inverse() * (fund_to_simple * vector(lamb))
-        else:
-            lamb = standard_to_simple.inverse() * vector(lamb)
-        lamb = weyl_group.domain()(list(eval(str(lamb))))
+        lamb = convertWeightParameters(name, lamb, simple)
 
     # if mu is not specified, 0 vector is used
     if mu == None:
         mu = weyl_group.domain()([0 for i in range(0, len(lie_algebra.simple_roots()))])
     else:
-        while not len(mu) == standard_to_simple.ncols():
-            mu.append(0)
-        if not simple:
-            mu = standard_to_simple.inverse() * (fund_to_simple * vector(mu))
-        else:
-            mu = standard_to_simple.inverse() * vector(mu)
-        mu = weyl_group.domain()(list(eval(str(mu))))
+        mu = convertWeightParameters(name, mu, simple)
 
     rho = lie_algebra.rho()
     altset = findAltSet(name, lamb, mu)
-    #print(changeBasis * vector(list(Eval(lamb))))
+
     translations = {}
     for elm in altset:
         # expression in partition function
@@ -167,19 +184,31 @@ def calculateMultiplicity(name, lamb = None, mu = None, q_analog = False, simple
 
     return mult
 
-def printPartitions(name, weight, tex):
+def printPartitions(name, weight, tex, simple = True):
     lie_algebra = RootSystem(name).ambient_space()
 
     # used to change the basis from the standard basis of R^n to simple roots
-    changeBasis = getBasisChange(name)
+    change_basis = getBasisChange(name)
+    symb = "\\alpha_"
+
+    # if the weight is in terms of fundamentals, change basis to simples for partitioning
+    if not simple:
+        weight = changeFundToSimple(name, weight)
+        symb = "\\omega_"
 
     positive_roots = [vector(list(Eval(x))) for x in RootSystem(name).ambient_space().positive_roots()]
-    positive_roots = [getBasisChange(name) * x for x in positive_roots]
-    latex_roots = ["".join([str(root[j] if root[j] != 1 else "") + "\\alpha_" + str(j+1)+"+" if root[j] != 0 else "" for j in range(0, len(root))]) for root in positive_roots]
-    latex_roots = [root[0:len(root)-1] for root in latex_roots]
+    positive_roots = [change_basis * x for x in positive_roots]
     weight_positive_roots = [Weight(list(root)) for root in positive_roots]
+
     weight = Weight(weight)
     tree = PartitionTree(weight, weight_positive_roots, 0, 0)
+
+    # here we change the positive roots to be in terms of the fundamental weights so what is printed matches the input
+    if not simple:
+        change_basis = getFundamentalToSimple(name).inverse()
+        positive_roots = [change_basis * x for x in positive_roots]
+    latex_roots = ["".join([str(root[j] if root[j] != 1 else "") + symb + str(j+1)+"+" if root[j] != 0 else "" for j in range(0, len(root))]) for root in positive_roots]
+    latex_roots = [root[0:len(root)-1].replace("+-1", "-").replace("-1", "-").replace("+-", "-") for root in latex_roots]
 
     partitions = []
     tree.getPartitions(partitions)
