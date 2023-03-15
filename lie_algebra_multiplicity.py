@@ -1,7 +1,9 @@
 import __future__
 from Weight import Weight
 from PartitionTree import PartitionTree
-from sage.all import *
+import util as util
+from sage.all import vector
+from sage.all import RootSystem, WeylGroup
 
 def Eval(string):
     return eval(compile(str(string), '<string>', 'eval', __future__.division.compiler_flag))
@@ -47,137 +49,141 @@ def getBasisChange(name):
         basis_change.append([1 if j==i else 0 for j in range(0, len(basis_change[0]))])
     return matrix(basis_change).transpose().inverse()
 
-def geometricSumForPartition(positive_root, translations, q_analog):
-    x = 1
-    for i in range(0, len(positive_root)):
-        for j in range(0, positive_root[i]):
-            x = x * translations["A" + str(i+1)]
-    return 1/(1 - x) if not q_analog else 1/(1 -translations['q']*x)
+"""
+Calculate the Partition (or q-analog) function for the weight of the given Lie
+Algebra.
 
-def calculatePartition(name, weight, positive_roots = [], translations = {}, q_analog = False, simple = True):
-    root_system = RootSystem(name).ambient_space()
+lie_algebra_name: name of the Lie Algebra (i.e. A2, B3, G2, E7, etc.)
+weight: The weight to be partitioned, as a list of coefficients to simple roots.
+q_analog: Boolean, defaults to False. If True, compute the q-analog of the
+          partition function.
+positive_roots: The set of positive weights to use for partitioning. Defaults to
+                the entire set of positive roots. Pass in a subset to restrict
+                which partitons will be counted.
+translations: Dictionary from string to variable objects used in the geometric
+              sum. Generate with util.getVariableDictionary or leave empty.
+"""
+def calculatePartition(lie_algebra_name, weight, q_analog = False, positive_roots = [], translations = {}):
+    lie_algebra = RootSystem(lie_algebra_name).ambient_space()
+    assert len(weight) == lie_algebra.dimension() - 1 or weight[-1] == 0
+
     if positive_roots == []:
-        basis_change = getBasisChange(name)
-        positive_roots = [vector(list(Eval(x))) for x in root_system.positive_roots()]
-        positive_roots = [basis_change * x for x in positive_roots]
-
-    if not simple:
-        weight = list(changeFundToSimple(name, weight))[0:len(root_system.simple_roots())]
+        positive_roots = util.getPositiveRoots(lie_algebra_name)
 
     if translations == {}:
-        s = ''
-        if q_analog:
-            s = 'q, '
-        s += 'A1'
-        for i in range(1, len(weight)):
-            s += ', A' + str(i + 1)
-        variables = var(s)
-        for i in range(0, len(weight)):
-            translations["A" + str(i+1)] = eval("A" + str(i+1))
+        translations = util.getVariableDictionary(lie_algebra, q_analog)
 
-        if q_analog:
-            translations['q'] = q
-
-    termsForSum = [geometricSumForPartition(list(x), translations, q_analog) for x in positive_roots]
+    termsForSum = [util.geometricSumForPartition(list(positive_root), translations, q_analog) for positive_root in positive_roots]
     answer = 1
     for x in termsForSum:
         answer *= x
 
-    for i in range(0, len(weight)):
+    # find the partition (or q-analog) using geometric series expansion. Our
+    # answer is the coefficient of the term with variable exponents matching the
+    # coefficents of their corresponding simple root.
+    for i in range(lie_algebra.dimension() - 1):
         answer = answer.series(translations["A" + str(i+1)], weight[i] + 1).truncate()
         answer = answer.coefficient(translations["A" + str(i+1)], weight[i])
 
     answer = answer.expand()
     return answer
 
-def findAltSet(name, lamb = None, mu = None, simple = True):
+"""
+Return a list containing the alternation set for the given lambda and mu. These
+are the elements of the Weyl Group of the Lie Algebra that contribute non-zero
+terms to the sum in the muliplicity formula.
+
+lie_algebra_name: name of the Lie Algebra (i.e. A2, B3, G2, E7, etc.)
+lamb: The value of lambda in the multiplicity formula, as a list of coefficients
+      to simple roots.
+mu: The value of mu in the multiplicity formula, as a list of coefficients to
+    simple roots.
+"""
+def findAltSet(lie_algebra_name, lamb = None, mu = None):
     # initialize constants and vector space for the lie algebra
-    lie_algebra = RootSystem(name).ambient_space()
-    weyl_group = WeylGroup(name, prefix = "s")
+    lie_algebra = RootSystem(lie_algebra_name).ambient_space()
+    weyl_group = WeylGroup(lie_algebra_name, prefix = "s")
     simples = weyl_group.gens()
 
     altset = [weyl_group.one()]
 
     # used to change the basis from the standard basis of R^n to simple roots
-    basis_change = getBasisChange(name)
+    standard_to_simple_basis_change = util.getStandardToSimpleBasisChange(lie_algebra_name)
 
-    # if lambda is not specified, the highest root is used
-    if lamb == None:
-        lamb = lie_algebra.highest_root()
-    elif type(lamb) is list:
-        lamb = convertWeightParameters(name, lamb, simple)
-
-    # if mu is not specified, 0 vector is used
-    if mu == None:
-        mu = weyl_group.domain()([0 for i in range(0, len(lie_algebra.simple_roots()))])
-    elif type(mu) is list:
-        mu  = convertWeightParameters(name, mu, simple)
+    lamb_weight = util.getLambda(lie_algebra, standard_to_simple_basis_change, lamb)
+    mu_weight = util.getMu(lie_algebra, standard_to_simple_basis_change, mu)
+    rho = lie_algebra.rho()
 
     # check to see if the alt set is the empty set
-    init = (lamb + mu)
-    init = basis_change * vector(list(Eval(init)))
-    init = Weight(init)
+    init = (lamb_weight + rho) - (rho + mu_weight)
+    init = standard_to_simple_basis_change * vector(util.convertWeightToList(init))
+    init = Weight(list(init))
 
     if init.isNegative():
         return []
 
-    rho = lie_algebra.rho()
+    # conduct breadth first search of weyl group elements that can be applied
+    # without making the weight to partition have any negative or fractional
+    # coefficients. We can stop appending them once we get a negative/fractional
+    # coefficient because applying another permutation will not remove a
+    # fraction/make a weight less negative.
     length = len(altset)
-    i=0
+    i = 0
     while i < length:
         for simple in simples:
-            if ((altset[i] == simple)or (altset[i] == altset[i] * simple)):
+            elm = altset[i] * simple
+            if (altset[i] == simple) or (altset[i] == elm):
                 continue
-            res = (altset[i]*simple).action(lamb + rho) - (rho + mu)
-            res = basis_change * vector(list(Eval(res)))
-            res = Weight(res)
 
-            if not (res.isNegative() or res.hasFraction()):
-                if not (altset[i]*simple in altset):
+            res = elm.action(lamb_weight + rho) - (rho + mu_weight)
+            res = standard_to_simple_basis_change * vector(util.convertWeightToList(res))
+            res = Weight(list(res))
+
+            if not res.isNegative() and not res.hasFraction():
+                if not elm in altset: # TODO: check if this is this necessary
                     altset.append(altset[i]*simple)
                     length += 1
         i+=1
 
     return altset
 
+"""
+Compute Kostant's multiplicity formula (or the q-analog) for lambda and mu in
+the given Lie Algebra.
 
-def calculateMultiplicity(name, lamb = None, mu = None, q_analog = False, simple=True):
-    mult = 0
-    lie_algebra = RootSystem(name).ambient_space()
-    weyl_group = WeylGroup(name, prefix = "s")
+lie_algebra_name: name of the Lie Algebra (i.e. A2, B3, G2, E7, etc.)
+lamb: The value of lambda in the multiplicity formula, as a list of coefficients
+      to simple roots.
+mu: The value of mu in the multiplicity formula, as a list of coefficients to
+    simple roots.
+q_analog: Boolean, defaults to False. If True, compute the q-analog of the
+          multiplicity formula.
+"""
+def calculateMultiplicity(lie_algebra_name, lamb = None, mu = None, q_analog = False):
+    lie_algebra = RootSystem(lie_algebra_name).ambient_space()
+    weyl_group = WeylGroup(lie_algebra_name, prefix = "s")
 
     # used to change the basis from the standard basis of R^n to simple roots
-    standard_to_simple = getBasisChange(name)
-    fund_to_simple = getFundamentalToSimple(name)
+    standard_to_simple_basis_change = util.getStandardToSimpleBasisChange(lie_algebra_name)
 
-    positive_roots = [vector(list(Eval(x))) for x in RootSystem(name).ambient_space().positive_roots()]
-    positive_roots = [standard_to_simple * x for x in positive_roots]
-
-    # if lambda is not specified, the highest root is used
-    if lamb == None:
-        lamb = lie_algebra.highest_root()
-    else:
-        lamb = convertWeightParameters(name, lamb, simple)
-
-    # if mu is not specified, 0 vector is used
-    if mu == None:
-        mu = weyl_group.domain()([0 for i in range(0, len(lie_algebra.simple_roots()))])
-    else:
-        mu = convertWeightParameters(name, mu, simple)
-
+    lamb_weight = util.getLambda(lie_algebra, standard_to_simple_basis_change, lamb)
+    mu_weight = util.getMu(lie_algebra, standard_to_simple_basis_change, mu)
     rho = lie_algebra.rho()
-    altset = findAltSet(name, lamb, mu)
 
-    translations = {}
+    positive_roots = util.getPositiveRoots(lie_algebra_name)
+    translations = util.getVariableDictionary(lie_algebra, q_analog)
+
+    mult = 0
+    altset = findAltSet(lie_algebra_name, lamb, mu)
     for elm in altset:
         # expression in partition function
-        res = elm.action(lamb + rho) - (mu + rho)
+        res = elm.action(lamb_weight + rho) - (mu_weight + rho)
 
         #change basis from standard basis to simple roots
-        res = vector(list(Eval(res)))
-        res = standard_to_simple * res
+        res = vector(util.convertWeightToList(res))
+        res = standard_to_simple_basis_change * res
 
-        term = calculatePartition(name, list(res), positive_roots, translations = translations, q_analog=q_analog)
+        term = calculatePartition(lie_algebra_name, list(res), q_analog, positive_roots, translations)
 
         term *= (-1)**elm.length()
         mult += term

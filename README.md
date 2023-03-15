@@ -54,4 +54,4 @@ weight - array of numbers: The weight you want to partition. It is entered as a 
 
 tex - string: The name of the file the outputted Latex will be saved to. You must include the ".tex" ending.
 
-simple - boolean: Tells us whether to interpret the input weight a linear combination of simple roots or fundamental weights. The also determines whether we print the positive roots with fundamental weights or simple roots.
+simple - boolean: Tells us whether to interpret the input weight as a linear combination of simple roots or fundamental weights. The also determines whether we print the positive roots with fundamental weights or simple roots.
