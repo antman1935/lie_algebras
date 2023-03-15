@@ -12,16 +12,35 @@ def convertWeightToList(weight):
         arr.append(0)
     return arr
 
-def getStandardToSimpleBasisChange(name):
-    simples = RootSystem(name).ambient_space().simple_roots()
-    bChange = [convertWeightToList(x) for x in simples]
+def buildBasisChangeToStandard(basis):
+    bChange = [convertWeightToList(x) for x in basis]
 
-    # insert standard e_i for i > len(simple roots) to make a square vector
+    # insert standard e_i for i > len(basis) to make a square vector
     for i in range(len(bChange), len(bChange[0])):
         bChange.append([1 if j==i else 0 for j in range(0, len(bChange[0]))])
 
     # transpose gets simple to standard basis change, inverse reverses
     return matrix(bChange).transpose().inverse()
+
+def getStandardToSimpleBasisChange(lie_algebra_name):
+    simples = RootSystem(lie_algebra_name).ambient_space().simple_roots()
+    return buildBasisChangeToStandard(simples)
+
+def getStandardToFundamentalBasisChange(lie_algebra_name):
+    fundamentals = RootSystem(lie_algebra_name).ambient_space().fundamental_weights()
+    return buildBasisChangeToStandard(fundamentals)
+
+def getFundamentalToSimpleBasisChange(lie_algebra_name):
+    standard_to_simple_basis_change = getStandardToSimpleBasisChange(lie_algebra_name)
+    standard_to_fundamental_basis_change = getStandardToFundamentalBasisChange(lie_algebra_name)
+    return standard_to_simple_basis_change * standard_to_fundamental_basis_change.inverse()
+
+def changeFundamentalWeightToSimple(lie_algebra_name, weight):
+    fund_to_simple = getFundamentalToSimpleBasisChange(lie_algebra_name)
+
+    while not len(weight) == fund_to_simple.ncols():
+        weight.append(0)
+    return list(fund_to_simple * vector(weight))
 
 def getPositiveRoots(name):
     standard_to_simple_basis_change = getStandardToSimpleBasisChange(name)
@@ -40,7 +59,6 @@ def geometricSumForPartition(positive_root, translations, q_analog):
     x = 1 if not q_analog else translations["q"]
     for i in range(len(positive_root)):
             x = x * (translations["A" + str(i+1)] ** positive_root[i])
-    print(positive_root, " becomes ", x)
     return 1/(1 - x)
 
 def getLambda(lie_algebra, standard_to_simple_basis_change, lamb):

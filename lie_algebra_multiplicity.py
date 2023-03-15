@@ -1,53 +1,8 @@
-import __future__
 from Weight import Weight
 from PartitionTree import PartitionTree
 import util as util
 from sage.all import vector
 from sage.all import RootSystem, WeylGroup
-
-def Eval(string):
-    return eval(compile(str(string), '<string>', 'eval', __future__.division.compiler_flag))
-
-def convertWeightParameters(name, weight, simple):
-    weyl_group = WeylGroup(name, prefix = "s")
-    standard_to_simple = getBasisChange(name)
-    fund_to_simple = getFundamentalToSimple(name)
-
-    while not len(weight) == standard_to_simple.ncols():
-        weight.append(0)
-    if not simple:
-        weight = standard_to_simple.inverse() * (fund_to_simple * vector(weight))
-    else:
-        weight = standard_to_simple.inverse() * vector(weight)
-
-    return weyl_group.domain()(list(eval(str(weight))))
-
-def changeFundToSimple(name, weight):
-    basis_change = getFundamentalToSimple(name)
-    weight = list(weight)
-    while not len(weight) == basis_change.ncols():
-            weight.append(0)
-    return basis_change * vector(weight)
-
-def getFundamentalToSimple(name):
-    simples = RootSystem(name).ambient_space().simple_roots()
-    simple_basis = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in simples])
-    for i in range(len(simple_basis), len(simple_basis[0])):
-        simple_basis.append([1 if j==i else 0 for j in range(0, len(simple_basis[0]))])
-
-    fundamentals = RootSystem(name).ambient_space().fundamental_weights()
-    fund_basis = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in fundamentals])
-    for i in range(len(fund_basis), len(fund_basis[0])):
-        fund_basis.append([1 if j==i else 0 for j in range(0, len(fund_basis[0]))])
-
-    return matrix(simple_basis).transpose().inverse() * matrix(fund_basis).transpose()
-
-def getBasisChange(name):
-    simples = RootSystem(name).ambient_space().simple_roots()
-    basis_change = ([Eval((str(x).replace("(", "[").replace(")", "]"))) for x in simples])
-    for i in range(len(basis_change), len(basis_change[0])):
-        basis_change.append([1 if j==i else 0 for j in range(0, len(basis_change[0]))])
-    return matrix(basis_change).transpose().inverse()
 
 """
 Calculate the Partition (or q-analog) function for the weight of the given Lie
@@ -162,7 +117,6 @@ def calculateMultiplicity(lie_algebra_name, lamb = None, mu = None, q_analog = F
     lie_algebra = RootSystem(lie_algebra_name).ambient_space()
     weyl_group = WeylGroup(lie_algebra_name, prefix = "s")
 
-    # used to change the basis from the standard basis of R^n to simple roots
     standard_to_simple_basis_change = util.getStandardToSimpleBasisChange(lie_algebra_name)
 
     lamb_weight = util.getLambda(lie_algebra, standard_to_simple_basis_change, lamb)
@@ -189,51 +143,62 @@ def calculateMultiplicity(lie_algebra_name, lamb = None, mu = None, q_analog = F
 
     return mult
 
-def printPartitions(name, weight, tex, simple = True):
-    lie_algebra = RootSystem(name).ambient_space()
+"""
+Print a latex file with a list of all the partitions of the weight in the given
+Lie Algebra.
 
-    # used to change the basis from the standard basis of R^n to simple roots
-    change_basis = getBasisChange(name)
-    symb = "\\alpha_"
+lie_algebra_name: name of the Lie Algebra (i.e. A2, B3, G2, E7, etc.)
+weight: the weight to partition, as a list of coefficients to simple roots.
+tex: filename to save the output
+simple: whether the output should be fundamental weights.
+simple_weight: whether the input should be treated as a linear combination of
+               simple roots or fundamental weights.
+"""
+def printPartitions(lie_algebra_name, weight, tex, simple = True, simple_weight = True):
+    lie_algebra = RootSystem(lie_algebra_name).ambient_space()
 
-    # if the weight is in terms of fundamentals, change basis to simples for partitioning
-    if not simple:
-        weight = changeFundToSimple(name, weight)
-        symb = "\\omega_"
+    standard_to_simple_basis_change = util.getStandardToSimpleBasisChange(lie_algebra_name)
+    symb = "\\alpha"
 
-    positive_roots = [vector(list(Eval(x))) for x in RootSystem(name).ambient_space().positive_roots()]
-    positive_roots = [change_basis * x for x in positive_roots]
+    # if the weight is in terms of fundamentals, change basis to simples for
+    # partitioning
+    if not simple_weight:
+        weight = util.changeFundamentalWeightToSimple(lie_algebra_name, weight)
+
+
+    positive_roots = util.getPositiveRoots(lie_algebra_name)
     weight_positive_roots = [Weight(list(root)) for root in positive_roots]
 
     weight = Weight(weight)
-    tree = PartitionTree(weight, weight_positive_roots, 0, 0)
+    tree = PartitionTree(weight, weight_positive_roots)
 
-    # here we change the positive roots to be in terms of the fundamental weights so what is printed matches the input
+    # here we change the positive roots to be in terms of the fundamental
+    # weights so what is printed matches the input
     if not simple:
-        change_basis = getFundamentalToSimple(name).inverse()
-        positive_roots = [change_basis * x for x in positive_roots]
-    latex_roots = ["".join([str(root[j] if root[j] != 1 else "") + symb + str(j+1)+"+" if root[j] != 0 else "" for j in range(0, len(root))]) for root in positive_roots]
-    latex_roots = [root[0:len(root)-1].replace("+-1", "-").replace("-1", "-").replace("+-", "-") for root in latex_roots]
+        symb = "\\omega"
+        simple_to_fundamental_basis_change = util.getFundamentalToSimpleBasisChange(lie_algebra_name).inverse()
+        positive_roots = [simple_to_fundamental_basis_change * root for root in positive_roots]
+    get_sign = lambda x: "-" if x == -1 else ""
+    latex_roots = ["+".join([str(root[j] if abs(root[j]) != 1 else get_sign(root[j])) + symb + "_{"+str(j+1)+"}" for j in range(len(root)) if root[j] != 0]) for root in positive_roots]
+    latex_roots = [root.replace("+-", "-") for root in latex_roots]
 
-    partitions = []
-    tree.getPartitions(partitions)
+    partitions = tree.getPartitions()
 
-    output = open(tex, "w")
-    output.write("\\documentclass{article}\n\\begin{document}\n")
-    for partition in partitions:
-        string = ""
-        for i in range(len(partition)):
-            coeff = partition[i]
-            if coeff > 1:
-                string += str(coeff) + "(" + latex_roots[i] + ") +"
-            elif coeff > 0:
-                string += "(" + latex_roots[i] + ")+"
-        string = "$"+ string[0:len(string)-1]
-        string += "$\\\\\\\\\n\n"
-        output.write(string)
-    output.write("\\end{document}")
-    output.close()
-    print "Done"
+    with open(tex, "w") as output:
+        output.write("\\documentclass{article}\n\\begin{document}\n")
+        for partition in partitions:
+            string = ""
+            for i in range(len(partition)):
+                coeff = partition[i]
+                if coeff > 1:
+                    string += str(coeff) + "(" + latex_roots[i] + ") +"
+                elif coeff > 0:
+                    string += "(" + latex_roots[i] + ")+"
+            string = "$"+ string[0:len(string)-1]
+            string += "$\\\\\\\\\n\n"
+            output.write(string)
+        output.write("\\end{document}")
+    print("Done")
 
 if __name__ == "__main__":
     #calculateMultiplicity("A3", [3,3,3], [2,2,2], True)
