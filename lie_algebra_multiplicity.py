@@ -65,7 +65,6 @@ translations: Dictionary from string to variable objects used in the geometric
 """
 def calculatePartition(lie_algebra_name, weight, q_analog = False, positive_roots = [], translations = {}):
     lie_algebra = RootSystem(lie_algebra_name).ambient_space()
-    assert len(weight) == lie_algebra.dimension() - 1 or weight[-1] == 0
 
     if positive_roots == []:
         positive_roots = util.getPositiveRoots(lie_algebra_name)
@@ -81,7 +80,7 @@ def calculatePartition(lie_algebra_name, weight, q_analog = False, positive_root
     # find the partition (or q-analog) using geometric series expansion. Our
     # answer is the coefficient of the term with variable exponents matching the
     # coefficents of their corresponding simple root.
-    for i in range(lie_algebra.dimension() - 1):
+    for i in range(len(weight)):
         answer = answer.series(translations["A" + str(i+1)], weight[i] + 1).truncate()
         answer = answer.coefficient(translations["A" + str(i+1)], weight[i])
 

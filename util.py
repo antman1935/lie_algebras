@@ -32,15 +32,15 @@ def getVariableDictionary(lie_algebra, q_analog):
     s = ""
     if q_analog:
         s = "q, "
-    s += ", ".join([f"A{i + 1}" for i in range(lie_algebra.dimension() - 1)])
+    s += ", ".join([f"A{i + 1}" for i in range(lie_algebra.dimension())])
     variables = var(s)
     return {str(variable): variable for variable in variables}
 
 def geometricSumForPartition(positive_root, translations, q_analog):
-    assert positive_root[-1] == 0
     x = 1 if not q_analog else translations["q"]
-    for i in range(0, len(positive_root) - 1):
+    for i in range(len(positive_root)):
             x = x * (translations["A" + str(i+1)] ** positive_root[i])
+    print(positive_root, " becomes ", x)
     return 1/(1 - x)
 
 def getLambda(lie_algebra, standard_to_simple_basis_change, lamb):
